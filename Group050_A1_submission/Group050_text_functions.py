@@ -26,7 +26,17 @@ _LITERAL_NAN = "NaN"
 # Unicode-aware. Including hyphens in both boundaries rejects malformed
 # extensions instead of accepting a valid prefix from a longer token.
 _ORDER_REFERENCE_RE = re.compile(r"(?<![\w-])(?ai:(?:HORD|CORD)[0-9]{6})(?![\w-])")
+
+# Task 3, Step 2: SKU extraction (owner: Xingao Zhan / Evodia).
+# Require SKU- followed by one or more ASCII letters/digits, with no fixed
+# suffix length. (?ai:...) allows either case without Unicode lookalikes;
+# the outer Unicode-aware boundaries reject embedded or hyphen-extended codes.
 _PRODUCT_SKU_RE = re.compile(r"(?<![\w-])(?ai:SKU-[A-Z0-9]+)(?![\w-])")
+
+# Task 3, Step 2: promotion extraction (owner: Xingao Zhan / Evodia).
+# Only B1SAVE- to B5SAVE- followed by exactly two ASCII digits are valid.
+# The right boundary prevents extracting B3SAVE-20 from B3SAVE-200 or
+# B3SAVE-20-extra; the left boundary prevents matching inside a larger token.
 _PROMO_CODE_RE = re.compile(r"(?<![\w-])(?ai:B[1-5]SAVE-[0-9]{2})(?![\w-])")
 
 _EMOJI_RE = re.compile(
@@ -119,13 +129,50 @@ def extract_order_reference(value):
 
 
 def extract_product_sku(value):
-    """Accept None or a string; return the upper-case SKU or 'NaN'."""
+    """Extract a product SKU from raw narrative text (Task 3, Step 2).
+
+    Owner: Xingao Zhan (Evodia).
+    Input: a structurally parsed raw string or None. Call before narrative
+    cleaning (Steps 3-9), while the reference/SKU wrapper is still present.
+    Output: the first valid bounded SKU, in upper case, or the literal string
+    "NaN" for non-string input, empty text or no valid match.
+
+    The shared helper searches the whole input with _PRODUCT_SKU_RE and
+    normalises only the matched code. This extracts a code; it does not check
+    catalogue membership, clean the narrative or modify the source text.
+
+    >>> extract_product_sku("Reference: HORD000001 | SKU: sku-a1B2")
+    'SKU-A1B2'
+    >>> extract_product_sku("SKU-ABC123-extra")
+    'NaN'
+    >>> extract_product_sku(None)
+    'NaN'
+    """
 
     return _extract_upper(value, _PRODUCT_SKU_RE)
 
 
 def extract_promo_code(value):
-    """Accept None or a string; return the upper-case code or 'NaN'."""
+    """Extract a promotion code from raw narrative text (Task 3, Step 2).
+
+    Owner: Xingao Zhan (Evodia).
+    Input: a structurally parsed raw string or None. Extract before narrative
+    cleaning (Steps 3-9) removes the PROMO wrapper from the customer note.
+    Output: the first valid bounded code, in upper case, or the literal string
+    "NaN" for non-string input, empty text or no valid match.
+
+    The shared helper searches with _PROMO_CODE_RE, so invalid prefixes,
+    non-ASCII digits and malformed continuations cannot yield partial codes.
+    This records a reference only; it does not apply a discount or change
+    order amounts, and a PROMO label is not required for a valid match.
+
+    >>> extract_promo_code("PROMO: b5save-99")
+    'B5SAVE-99'
+    >>> extract_promo_code("B3SAVE-200")
+    'NaN'
+    >>> extract_promo_code(None)
+    'NaN'
+    """
 
     return _extract_upper(value, _PROMO_CODE_RE)
 
