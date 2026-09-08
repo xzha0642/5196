@@ -180,46 +180,107 @@ def extract_promo_code(value):
 def build_latin_analysis(value):
     """Accept cleaned multilingual text; return Latin analysis or 'NaN'."""
 
+    # Step 1: Validate the input.
+    # This function expects review_body_clean rather than the noisy raw review.
+    # Non-string values and the published literal missing-value sentinel
+    # cannot produce a Latin-script analysis.
     if not isinstance(value, str) or value == _LITERAL_NAN:
         return _LITERAL_NAN
 
+    # Step 2: Apply Unicode NFC normalisation.
+    # This gives canonically equivalent characters a consistent representation
+    # while preserving valid multilingual Unicode text.
     text = unicodedata.normalize("NFC", value)
+
+    # Step 3: Initialise the output and processing state.
+    # output_characters stores characters retained for the Latin analysis.
+    # contains_latin_letter records whether at least one Latin letter survives.
+    # previous_character_was_latin allows combining marks to be retained only
+    # when they belong to a retained Latin base letter.
     output_characters = []
     contains_latin_letter = False
     previous_character_was_latin = False
 
+    # Step 4: Inspect every Unicode character in the cleaned review.
     for character in text:
+        # Obtain the Unicode general category and official Unicode name.
+        # Categories beginning with "L" are letters, while those beginning
+        # with "M" are combining marks.
         category = unicodedata.category(character)
         unicode_name = unicodedata.name(character, "")
 
+        # Step 4.1: Process Unicode letters.
         if category.startswith("L"):
+
+            # Retain Latin-script letters, including precomposed European
+            # letters with diacritics such as é, ü and ñ.
             if "LATIN" in unicode_name:
                 output_characters.append(character)
                 contains_latin_letter = True
                 previous_character_was_latin = True
+
+            # Remove letters from non-Latin scripts.
+            # Insert a space so that Latin text on either side of removed
+            # non-Latin writing does not become incorrectly joined.
             else:
-                # Avoid joining Latin words that surrounded removed script.
                 output_characters.append(" ")
                 previous_character_was_latin = False
+
+        # Step 4.2: Process Unicode combining marks.
+        # Retain a combining mark only when it directly continues a retained
+        # Latin base letter. Marks belonging to removed scripts are discarded.
         elif category.startswith("M"):
-            # Keep a combining mark only when it belongs to retained Latin.
             if previous_character_was_latin:
                 output_characters.append(character)
+
+        # Step 4.3: Preserve applicable non-letter content.
+        # Digits, punctuation, symbols and whitespace are retained because
+        # the Latin-analysis field may keep these characters.
         else:
             output_characters.append(character)
             previous_character_was_latin = False
 
-    result = re.sub(r"\s+", " ", "".join(output_characters)).strip()
-    return result if contains_latin_letter and result else _LITERAL_NAN
+    # Step 5: Reconstruct the analysis string.
+    # Collapse spaces, tabs and line breaks into one space, then remove
+    # whitespace from the beginning and end of the result.
+    result = re.sub(
+        r"\s+",
+        " ",
+        "".join(output_characters),
+    ).strip()
+
+    # Step 6: Apply the published sentinel rule.
+    # Return the result only when at least one Latin letter remains.
+    # A result containing only digits or punctuation is not sufficient.
+    return (
+        result
+        if contains_latin_letter and result
+        else _LITERAL_NAN
+    )
 
 
 def contains_non_latin_script(value):
     """Accept cleaned multilingual text; return a Python bool."""
 
+    # Step 1: Handle invalid or missing cleaned text.
+    # Non-string values and the literal "NaN" sentinel do not contain
+    # review text, so the required indicator is False.
     if not isinstance(value, str) or value == _LITERAL_NAN:
         return False
 
+    # Step 2: Apply Unicode NFC normalisation before script detection.
+    # This keeps canonically equivalent text consistent and prevents
+    # non-ASCII Latin letters from being misclassified.
     text = unicodedata.normalize("NFC", value)
+
+    # Step 3: Inspect Unicode letters and detect non-Latin script.
+    # A character counts as non-Latin only when:
+    #   1. its Unicode category identifies it as a letter; and
+    #   2. its Unicode name does not identify it as Latin.
+    #
+    # Digits, punctuation, emoji, symbols and combining marks alone do not
+    # trigger the indicator. any() stops as soon as one matching letter is
+    # found and otherwise returns False after checking the complete text.
     return any(
         unicodedata.category(character).startswith("L")
         and "LATIN" not in unicodedata.name(character, "")
